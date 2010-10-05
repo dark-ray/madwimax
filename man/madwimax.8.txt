@@ -50,8 +50,17 @@ OPTIONS
 *-l* 'FILE', *--log-file*='FILE'::
     Write log to the specified 'FILE' instead of the other methods.
 
-*-o, --diode-off*::
-    Turn off the diode (diode is turned on by default).
+*-o, --diode-on*::
+    Turn on the diode (diode is turned off by default).
+
+*-p* 'FILE', *--pid-file*='FILE'::
+    Specify path to the pid-file.
+
+*-s* 'FILE', *--stats-file*='FILE'::
+    Specify path to the statistics file.
+
+*-i* 'NAME', *--interface*='NAME'::
+    Specify wimax interface name (by default wmx...).
 
 *-q, --quiet*::
     Switch off logging.

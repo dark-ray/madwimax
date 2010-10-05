@@ -41,10 +41,12 @@
 
 /* variables for the command-line parameters */
 static int daemonize = 0;
-static int diode_on = 1;
+static int diode_on = 0;
 static int detach_dvd = 0;
 static char *ssid = "@yota.ru";
 static char *event_script = SYSCONFDIR "/event.sh";
+static char *pid_fname = NULL;
+static char *stats_fname = NULL;
 
 static FILE *logfile = NULL;
 
@@ -90,7 +92,7 @@ static union {
 #define MAX_PACKET_LEN		0x4000
 
 /* information collector */
-static struct wimax_dev_status wd_status;
+static struct wimax_dev_status wd_status  = {0};
 
 char *wimax_states[] = {"INIT", "SYNC", "NEGO", "NORMAL", "SLEEP", "IDLE", "HHO", "FBSS", "RESET", "RESERVED", "UNDEFINED", "BE", "NRTPS", "RTPS", "ERTPS", "UGS", "INITIAL_RNG", "BASIC", "PRIMARY", "SECONDARY", "MULTICAST", "NORMAL_MULTICAST", "SLEEP_MULTICAST", "IDLE_MULTICAST", "FRAG_BROADCAST", "BROADCAST", "MANAGEMENT", "TRANSPORT"};
 
@@ -103,7 +105,7 @@ static int kernel_driver_active = 0;
 static unsigned char read_buffer[MAX_PACKET_LEN];
 
 static int tap_fd = -1;
-static char tap_dev[20] = "wimax%d";
+static char tap_dev[20] = "wmx%d";
 static int tap_if_up = 0;
 
 static nfds_t nfds;
@@ -641,13 +643,16 @@ void usage(const char *progname)
 	printf("  -d, --daemonize             daemonize after startup\n");
 	printf("  -l, --log-file=FILE         write log to the FILE instead of the other\n");
 	printf("                              methods\n");
-	printf("  -o, --diode-off             turn off the diode (diode is on by default)\n");
+	printf("  -o, --diode-on              turn on the diode (diode is off by default)\n");
 	printf("  -f, --detach-dvd            detach pseudo-DVD kernel driver on startup\n");
 	printf("      --device=VID:PID        specify the USB device by VID:PID\n");
 	printf("      --exact-device=BUS/DEV  specify the exact USB bus/device (use with care!)\n");
 	printf("  -V, --version               print the version number\n");
 	printf("      --ssid                  specify SSID, a friendly name that identifies a\n");
 	printf("                              particular 802.16e wireless network\n");
+  printf("  -p, --pid-file=FILE         specify path to the pid-file\n");
+  printf("  -s, --stats-file=FILE       specify path to the statistics file\n");
+  printf("  -i, --interface=NAME        specify wimax interface name (by default wmx...)\n");
 	printf("  -e, --event-script=FILE     specify path to the event script\n");
 	printf("  -h, --help                  display this help\n");
 }
@@ -677,12 +682,15 @@ static void parse_args(int argc, char **argv)
 			{"exact-device",	required_argument,	0, 2},
 			{"version",		no_argument,		0, 'V'},
 			{"ssid",		required_argument,	0, 3},
+			{"pid-file",      required_argument,   0, 'p'},
+			{"stats-file",    required_argument,   0, 's'},
 			{"event-script",	required_argument,	0, 'e'},
+			{"interface",   required_argument,  0, 'i'},
 			{"help",		no_argument,		0, 'h'},
 			{0, 0, 0, 0}
 		};
 
-		c = getopt_long(argc, argv, "vqdl:ofVe:h", long_options, &option_index);
+		c = getopt_long(argc, argv, "vqdl:ofVe:p:s:i:h", long_options, &option_index);
 
 		/* detect the end of the options. */
 		if (c == -1)
@@ -712,7 +720,7 @@ static void parse_args(int argc, char **argv)
 					break;
 				}
 			case 'o': {
-					diode_on = 0;
+					diode_on = 1;
 					break;
 				}
 			case 'f': {
@@ -783,6 +791,19 @@ static void parse_args(int argc, char **argv)
 					event_script = optarg;
 					break;
 				}
+			case 'p': {
+          pid_fname = optarg;
+          break;
+        }
+      case 's': {
+          stats_fname = optarg;
+          break;
+        }
+      case 'i': {
+          strncpy(tap_dev, optarg, sizeof(tap_dev) - 1);
+          tap_dev[sizeof(tap_dev) - 1] = '\0';
+          break;
+        }
 			case '?': {
 					/* getopt_long already printed an error message. */
 					usage(argv[0]);
@@ -825,6 +846,12 @@ static void exit_release_resources(int code)
 	if(logfile != NULL) {
 		fclose(logfile);
 	}
+	if (stats_fname) {
+    unlink(stats_fname);
+  }
+	if (pid_fname) {
+    unlink(pid_fname);
+  }
 	exit(code);
 }
 
@@ -835,6 +862,53 @@ static void sighandler_exit(int signum) {
 static void sighandler_wait_child(int signum) {
 	int status;
 	wait3(&status, WNOHANG, NULL);
+}
+
+static int write_pidfile(const char *fname) {
+  FILE *pid_fd;
+
+  /* we will overwrite stale pidfile */
+  if (fname && (pid_fd = fopen(fname, "w"))) {
+    fprintf(pid_fd, "%d\n", getpid());
+    fclose(pid_fd);
+    return 1;
+  }
+  return 0;
+}
+
+static void sighandler_stats(int signum) {
+  FILE *fd;
+  if (stats_fname && (fd = fopen(stats_fname, "w"))) {
+    fprintf(fd,
+        "SSID: %s\n"
+        "State: %s\n"
+        "Number: %d\n"
+        "Response: %d\n",
+        ssid,
+        wimax_states[wd_status.state],
+        wd_status.state,
+        wd_status.link_status);
+    if (wd_status.link_status != 0) {
+        fprintf(fd,
+            "RSSI: %d\n"
+            "CINR: %f\n"
+            "TX Power: %d\n"
+            "Frequency: %d\n"
+            "BSID: %02x:%02x:%02x:%02x:%02x:%02x\n",
+            wd_status.rssi,
+            wd_status.cinr,
+            wd_status.txpwr,
+            wd_status.freq,
+            wd_status.bsid[0], wd_status.bsid[1], wd_status.bsid[2],
+            wd_status.bsid[3], wd_status.bsid[4], wd_status.bsid[5]);
+    }
+   fprintf(fd,
+        "Chip: %s\n"
+        "Firmware: %s\n",
+        wd_status.chip,
+        wd_status.firmware);
+        fclose(fd);
+  }
 }
 
 int main(int argc, char **argv)
@@ -852,6 +926,9 @@ int main(int argc, char **argv)
 	sigaction(SIGQUIT, &sigact, NULL);
 	sigact.sa_handler = sighandler_wait_child;
 	sigaction(SIGCHLD, &sigact, NULL);
+  sigfillset(&sigact.sa_mask);
+  sigact.sa_handler = sighandler_stats;
+  sigaction(SIGUSR1, &sigact, NULL);
 
 	if (logfile != NULL) {
 		set_wmlogger(argv[0], WMLOGGER_FILE, logfile);
@@ -870,6 +947,11 @@ int main(int argc, char **argv)
 		wmlog_msg(0, "failed to initialise libusb");
 		exit_release_resources(1);
 	}
+	
+	if (pid_fname && !write_pidfile(pid_fname)) {
+    wmlog_msg(0, "failed to create pid file %s", pid_fname);
+    exit_release_resources(1);
+  }
 
 	devh = find_wimax_device();
 	if (devh == NULL) {

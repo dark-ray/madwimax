@@ -8,9 +8,9 @@ GOTO="madwimax_rules_end"
 LABEL="madwimax_rules_start"
 
 # run madwimax
-ENV{ID_VENDOR_ID}=="04e8", ENV{ID_MODEL_ID}=="6761", RUN+="@SBINDIR@/madwimax -df --exact-device=$env{BUSNUM}/$env{DEVNUM}"
-ENV{ID_VENDOR_ID}=="04e9", ENV{ID_MODEL_ID}=="6761", RUN+="@SBINDIR@/madwimax -df --exact-device=$env{BUSNUM}/$env{DEVNUM}"
-ENV{ID_VENDOR_ID}=="04e8", ENV{ID_MODEL_ID}=="6731", RUN+="@SBINDIR@/madwimax -d --exact-device=$env{BUSNUM}/$env{DEVNUM}"
-ENV{ID_VENDOR_ID}=="04e8", ENV{ID_MODEL_ID}=="6780", RUN+="@SBINDIR@/madwimax -df --exact-device=$env{BUSNUM}/$env{DEVNUM}"
+ENV{ID_VENDOR_ID}=="04e8", ENV{ID_MODEL_ID}=="6761", RUN+="@SBINDIR@/madwimax -df --exact-device=$env{BUSNUM}/$env{DEVNUM} --stats-file=/var/tmp/madwimax-udev-states --pid-file=/var/run/madwimax.pid"
+ENV{ID_VENDOR_ID}=="04e9", ENV{ID_MODEL_ID}=="6761", RUN+="@SBINDIR@/madwimax -df --exact-device=$env{BUSNUM}/$env{DEVNUM} --stats-file=/var/tmp/madwimax-udev-states --pid-file=/var/run/madwimax.pid"
+ENV{ID_VENDOR_ID}=="04e8", ENV{ID_MODEL_ID}=="6731", RUN+="@SBINDIR@/madwimax -d --exact-device=$env{BUSNUM}/$env{DEVNUM} --stats-file=/var/tmp/madwimax-udev-states --pid-file=/var/run/madwimax.pid"
+ENV{ID_VENDOR_ID}=="04e8", ENV{ID_MODEL_ID}=="6780", RUN+="@SBINDIR@/madwimax -df --exact-device=$env{BUSNUM}/$env{DEVNUM} --stats-file=/var/tmp/madwimax-udev-states --pid-file=/var/run/madwimax.pid"
 
 LABEL="madwimax_rules_end"

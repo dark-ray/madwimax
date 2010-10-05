@@ -200,7 +200,7 @@ static int tap_clr_flags(const char *dev, short flags)
 {
 	struct ifreq ifr;
 	int fd;
-
+  
 	fd = socket(PF_INET, SOCK_DGRAM, 0);
 
 	safe_strncpy(ifr.ifr_name, dev, IFNAMSIZ);
