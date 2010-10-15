@@ -38,11 +38,14 @@
 #include "wimax.h"
 #include "tap_dev.h"
 
+/* global variables */
+timer_t timerid;
 
 /* variables for the command-line parameters */
 static int daemonize = 0;
 static int diode_on = 0;
 static int detach_dvd = 0;
+static unsigned long stats_period = 0;
 static char *ssid = "@yota.ru";
 static char *event_script = SYSCONFDIR "/event.sh";
 static char *pid_fname = NULL;
@@ -652,6 +655,7 @@ void usage(const char *progname)
 	printf("                              particular 802.16e wireless network\n");
   printf("  -p, --pid-file=FILE         specify path to the pid-file\n");
   printf("  -s, --stats-file=FILE       specify path to the statistics file\n");
+  printf("  -t, --stats-period-time=SEC specify period in seconds for logging to statistics file\n");
   printf("  -i, --interface=NAME        specify wimax interface name (by default wmx...)\n");
 	printf("  -e, --event-script=FILE     specify path to the event script\n");
 	printf("  -h, --help                  display this help\n");
@@ -684,13 +688,14 @@ static void parse_args(int argc, char **argv)
 			{"ssid",		required_argument,	0, 3},
 			{"pid-file",      required_argument,   0, 'p'},
 			{"stats-file",    required_argument,   0, 's'},
+			{"stats-period-time",    required_argument,   0, 't'},
 			{"event-script",	required_argument,	0, 'e'},
 			{"interface",   required_argument,  0, 'i'},
 			{"help",		no_argument,		0, 'h'},
 			{0, 0, 0, 0}
 		};
 
-		c = getopt_long(argc, argv, "vqdl:ofVe:p:s:i:h", long_options, &option_index);
+		c = getopt_long(argc, argv, "vqdl:ofVe:p:s:t:i:h", long_options, &option_index);
 
 		/* detect the end of the options. */
 		if (c == -1)
@@ -799,6 +804,10 @@ static void parse_args(int argc, char **argv)
           stats_fname = optarg;
           break;
         }
+      case 't': {
+          stats_period = strtoul(optarg, NULL, 10);
+          break;
+        }
       case 'i': {
           strncpy(tap_dev, optarg, sizeof(tap_dev) - 1);
           tap_dev[sizeof(tap_dev) - 1] = '\0';
@@ -846,6 +855,9 @@ static void exit_release_resources(int code)
 	if(logfile != NULL) {
 		fclose(logfile);
 	}
+	if (stats_period > 0) {
+    timer_delete(timerid);
+  }
 	if (stats_fname) {
     unlink(stats_fname);
   }
@@ -894,11 +906,15 @@ static void sighandler_stats(int signum) {
             "CINR: %f\n"
             "TX Power: %d\n"
             "Frequency: %d\n"
+            "Interface: %s\n"
+            "IPv4: %s\n"
             "BSID: %02x:%02x:%02x:%02x:%02x:%02x\n",
             wd_status.rssi,
             wd_status.cinr,
             wd_status.txpwr,
             wd_status.freq,
+            tap_dev,
+            tap_get_ip(tap_dev),
             wd_status.bsid[0], wd_status.bsid[1], wd_status.bsid[2],
             wd_status.bsid[3], wd_status.bsid[4], wd_status.bsid[5]);
     }
@@ -914,6 +930,8 @@ static void sighandler_stats(int signum) {
 int main(int argc, char **argv)
 {
 	struct sigaction sigact;
+  struct sigevent sev;
+  struct itimerspec its;
 	int r = 1;
 
 	parse_args(argc, argv);
@@ -926,9 +944,10 @@ int main(int argc, char **argv)
 	sigaction(SIGQUIT, &sigact, NULL);
 	sigact.sa_handler = sighandler_wait_child;
 	sigaction(SIGCHLD, &sigact, NULL);
-  sigfillset(&sigact.sa_mask);
   sigact.sa_handler = sighandler_stats;
-  sigaction(SIGUSR1, &sigact, NULL);
+  sigfillset(&sigact.sa_mask);
+  if (stats_period == 0)
+    sigaction(SIGUSR1, &sigact, NULL);
 
 	if (logfile != NULL) {
 		set_wmlogger(argv[0], WMLOGGER_FILE, logfile);
@@ -941,6 +960,24 @@ int main(int argc, char **argv)
 	if (daemonize) {
 		daemon(0, 0);
 	}
+	
+	if (stats_period != 0) {
+    sigemptyset(&sigact.sa_mask);
+    sigaction(SIGRTMIN, &sigact, NULL);
+    
+    // create the POSIX timer 
+    sev.sigev_notify = SIGEV_SIGNAL;
+    sev.sigev_signo = SIGRTMIN;
+    sev.sigev_value.sival_ptr = (void *) &timerid;
+    if (timer_create(CLOCK_MONOTONIC, &sev, &timerid) == 0) {
+        // start the POSIX timer
+        its.it_value.tv_sec = stats_period;
+        its.it_value.tv_nsec = 0;
+        its.it_interval.tv_sec = its.it_value.tv_sec;
+        its.it_interval.tv_nsec = its.it_value.tv_nsec;
+        timer_settime(timerid, 0, &its, NULL);
+    }
+  }
 
 	r = libusb_init(&ctx);
 	if (r < 0) {

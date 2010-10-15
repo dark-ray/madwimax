@@ -28,6 +28,8 @@
 
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <linux/if.h>
 #include <linux/if_arp.h>
 #include <linux/if_ether.h>
@@ -238,6 +240,30 @@ static int tap_test_flag(const char *dev, short flags)
 
 	close(fd);
 	return (ifr.ifr_flags & flags);
+}
+
+/* Get interface IP */
+char* tap_get_ip(const char *dev) 
+{
+  int fdesc;
+  struct ifreq ifr;
+  static char ipv4_addr[20] = "0.0.0.0";
+
+  fdesc = socket(PF_INET, SOCK_DGRAM, 0);
+  
+  /* IPv4 IP address */
+  ifr.ifr_addr.sa_family = AF_INET;
+
+  /* Fill in the structure */
+  safe_strncpy(ifr.ifr_name, dev, strlen(dev) + 1);
+
+  /* call the IOCTL */
+  if ((ioctl(fdesc, SIOCGIFADDR, &ifr)) < 0) 
+    return ipv4_addr;
+  
+  close(fdesc);
+  sprintf(ipv4_addr, "%s", inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
+  return ipv4_addr;
 }
 
 int tap_bring_up(int fd, const char *dev)
