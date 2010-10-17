@@ -247,7 +247,6 @@ char* tap_get_ip(const char *dev)
 {
   int fdesc;
   struct ifreq ifr;
-  static char ipv4_addr[20] = "0.0.0.0";
 
   fdesc = socket(PF_INET, SOCK_DGRAM, 0);
   
@@ -259,11 +258,10 @@ char* tap_get_ip(const char *dev)
 
   /* call the IOCTL */
   if ((ioctl(fdesc, SIOCGIFADDR, &ifr)) < 0) 
-    return ipv4_addr;
+    return "0.0.0.0";
   
   close(fdesc);
-  sprintf(ipv4_addr, "%s", inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
-  return ipv4_addr;
+  return inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr);
 }
 
 int tap_bring_up(int fd, const char *dev)

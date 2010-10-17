@@ -38,8 +38,12 @@
 #include "wimax.h"
 #include "tap_dev.h"
 
-/* global variables */
+/* global statictics variables */
 timer_t timerid;
+static unsigned long int stat_speed_in_mbit = 0;
+static unsigned long int stat_speed_out_mbit = 0;
+static char stat_rx_total_path[256];
+static char stat_tx_total_path[256];
 
 /* variables for the command-line parameters */
 static int daemonize = 0;
@@ -280,6 +284,11 @@ static int if_create()
 	tap_set_hwaddr(tap_fd, tap_dev, wd_status.mac);
 	tap_set_mtu(tap_fd, tap_dev, 1386);
 	set_coe(tap_fd);
+  
+  //tap_dev pointed now to correct interface so we are free to update stistics paths
+  sprintf(stat_rx_total_path, "/sys/class/net/%s/statistics/rx_bytes", tap_dev);
+  sprintf(stat_tx_total_path, "/sys/class/net/%s/statistics/tx_bytes", tap_dev);
+  
 	wmlog_msg(0, "Allocated tap interface: %s", tap_dev);
 	wmlog_msg(2, "Starting if-create script...");
 	raise_event("if-create");
@@ -366,6 +375,7 @@ static int alloc_transfers(void)
 
 int write_netif(const void *buf, int count)
 {
+  stat_speed_in_mbit += count;
 	return tap_write(tap_fd, buf, count);
 }
 
@@ -388,6 +398,8 @@ static int read_tap()
 	{
 		return 0;
 	}
+	
+	stat_speed_out_mbit += r;
 
 	len = fill_data_packet_header(buf, r);
 	wmlog_dumphexasc(4, buf, len, "Outgoing packet:");
@@ -890,6 +902,9 @@ static int write_pidfile(const char *fname) {
 
 static void sighandler_stats(int signum) {
   FILE *fd;
+  FILE *ftmp;
+  double stat_speed_in = 0, stat_speed_out = 0;
+  unsigned long int total_rx_bytes = 0, total_tx_bytes = 0;
   if (stats_fname && (fd = fopen(stats_fname, "w"))) {
     fprintf(fd,
         "SSID: %s\n"
@@ -901,6 +916,16 @@ static void sighandler_stats(int signum) {
         wd_status.state,
         wd_status.link_status);
     if (wd_status.link_status != 0) {
+        ftmp = fopen(stat_rx_total_path, "r");
+        if (ftmp != NULL) {
+            fscanf(ftmp, "%lu", &total_rx_bytes);
+            fclose(ftmp);
+        }
+        ftmp = fopen(stat_tx_total_path, "r");
+        if (ftmp != NULL) {
+            fscanf(ftmp, "%lu", &total_tx_bytes);
+            fclose(ftmp);
+        }
         fprintf(fd,
             "RSSI: %d\n"
             "CINR: %f\n"
@@ -908,7 +933,9 @@ static void sighandler_stats(int signum) {
             "Frequency: %d\n"
             "Interface: %s\n"
             "IPv4: %s\n"
-            "BSID: %02x:%02x:%02x:%02x:%02x:%02x\n",
+            "BSID: %02x:%02x:%02x:%02x:%02x:%02x\n"
+            "Rx (bytes): %lu\n"
+            "Tx (bytes): %lu\n",
             wd_status.rssi,
             wd_status.cinr,
             wd_status.txpwr,
@@ -916,7 +943,24 @@ static void sighandler_stats(int signum) {
             tap_dev,
             tap_get_ip(tap_dev),
             wd_status.bsid[0], wd_status.bsid[1], wd_status.bsid[2],
-            wd_status.bsid[3], wd_status.bsid[4], wd_status.bsid[5]);
+            wd_status.bsid[3], wd_status.bsid[4], wd_status.bsid[5],
+            total_rx_bytes,
+            total_tx_bytes);
+         
+        if (stats_period != 0) {
+            stat_speed_in_mbit  *= 8;
+            stat_speed_out_mbit *= 8;
+            
+            stat_speed_in  = ((double)stat_speed_in_mbit / stats_period) / (1024 * 1024);
+            stat_speed_out = ((double)stat_speed_out_mbit / stats_period) / (1024 * 1024);
+            stat_speed_in_mbit  = 0;
+            stat_speed_out_mbit = 0;
+            fprintf(fd,
+                    "Rx speed (mbit/sec): %.5f\n"
+                    "Tx speed (mbit/sec): %.5f\n",
+                    stat_speed_in,
+                    stat_speed_out);
+        }
     }
    fprintf(fd,
         "Chip: %s\n"
